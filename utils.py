@@ -4,7 +4,7 @@ import streamlit as st
 def rget(*args, **kwargs):
     header = {
     "Accept": "application/vnd.github+json",
-    "Authorization" : f"Bearer {st.secrets["TOKEN"]}"
+    "Authorization" : f"Bearer {st.secrets['TOKEN']}"
 }
     return requests.get(headers = header, *args, **kwargs).json()
 
