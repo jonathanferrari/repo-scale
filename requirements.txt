@@ -2,4 +2,4 @@ plotly>=5.0.0
 numpy
 pandas
 streamlit>=1.19.0
-dotenv
+python-dotenv
