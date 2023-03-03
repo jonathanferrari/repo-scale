@@ -1,9 +1,10 @@
 import os, json, re, requests, dotenv, base64, pandas as pd, numpy as np
+import streamlit as st
 
 def rget(*args, **kwargs):
     header = {
     "Accept": "application/vnd.github+json",
-    "Authorization" : f"Bearer {dotenv.get_key('.env', 'TOKEN')}"
+    "Authorization" : f"Bearer {st.secrets["TOKEN"]}"
 }
     return requests.get(headers = header, *args, **kwargs).json()
 
