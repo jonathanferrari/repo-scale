@@ -1,4 +1,4 @@
-import os, json, re, requests, dotenv
+import os, json, re, requests, dotenv, base64, pandas as pd, numpy as np
 
 def rget(*args, **kwargs):
     header = {
@@ -74,37 +74,75 @@ def get_repo(url = None, path = None, owner = None, name = None):
         path = f"{owner}/{name}"
     return rget(f"https://api.github.com/repos/{path}")
 
-def get_repo_size(url = None, owner = None, name = None):
-    if url:
-        size = get_repo_info(url)['size']
-        return convert_bytes(size)
-    elif owner and name:
-        size = get_repo_info(owner = owner, name = name)['size']
-        return convert_bytes(size)
+def get_branch_names(path):
+    branches = rget(f"https://api.github.com/repos/{path}/branches")
+    branch_names = [branch['name'] for branch in branches]
+    return branch_names
 
-def get_repo_content(url = None, owner = None, name = None, dir = "", recursive = False):
-    if url:
-        path = get_repo_path(url)
-    elif name and owner:
-        path = f"{owner}/{name}"
+def get_main_sha(path):
+    branch_names = get_branch_names(path)
+    if 'main' in branch_names:
+        main_name = 'main'
     else:
-        return "Please provide a valid repo url or owner and name"
-    files = rget(f"https://api.github.com/repos/{path}/contents{dir}")
-    keys = ['name', 'path', 'size', 'type', 'url']
-    directory = {file["path"] : {key : file[key] for key in keys} for file in files}
-    if not recursive:
-        return directory
-    has_subdirs = lambda directory: any([file['type'] == 'dir' for file in directory.values()])
-    while has_subdirs(directory):
-        for file in directory.values():
-            if file['type'] == 'dir':
-                dir = file
-                subfiles = get_repo_content(url = url, owner = owner, name = name, dir = dir['path'], recursive = True)
-                for path, subfile in subfiles.items():
-                    #print(subfile)
-                    directory[path] = subfile
-                directory.pop(dir['path'])
-                break
-    return directory
+        main_name = 'master'
+    return rget(f"https://api.github.com/repos/{path}/branches/{main_name}")['commit']['commit']['tree']['sha']
 
-#last line
+def get_repo_content(url = None, owner = None, name = None, recursive = True):
+    if url:
+        owner, name = get_repo_owner(url), get_repo_name(url)
+    path = f"{owner}/{name}"
+    sha = get_main_sha(path)
+    if recursive:
+        recursive = "recursive=1"
+    else:
+        recursive = ""
+    contents = rget(f"https://api.github.com/repos/{path}/git/trees/{sha}?{recursive}")
+    if contents['truncated']:
+        print("Warning: Contents contains more than 100,000 files, truncated to 100,000 files")
+    return contents['tree']
+
+def get_repo_files(url = None, owner = None, name = None, recursive = True):
+    contents = get_repo_content(url = url, owner = owner, name = name, recursive = recursive)
+    return [content['path'] for content in contents if content['type'] == 'blob']
+
+def get_repo_folders(url = None, owner = None, name = None, recursive = True):
+    contents = get_repo_content(url = url, owner = owner, name = name, recursive = recursive)
+    return [content['path'] for content in contents if content['type'] == 'tree']
+
+def get_repo_size(url = None, owner = None, name = None):
+    contents = get_repo_files(url = url, owner = owner, name = name, recursive = True)
+    return convert_bytes(sum([content['size'] for content in contents]))
+
+def search_user(q):
+    return [user["login"] for user in rget(f"https://api.github.com/search/users?q={q}&per_page=100")["items"]]
+
+def valid_user(user):
+    return requests.get(f"https://api.github.com/users/{user}").status_code == 200
+
+def find_user(search):
+    if valid_user(search):
+        return search
+    return search_user(search)
+
+def get_readme(path):
+    return base64.decodebytes(rget(f"https://api.github.com/repos/{path}/readme")['content'].encode('utf-8')).decode('utf-8').replace("#", "##")
+
+def file_type(path):
+    if path[0] == ".":
+        return "hidden"
+    else:
+        return path.split(".")[-1]
+    
+    
+def analyze(path):
+    content = get_repo_content(path)
+    files, dirs = [item for item in content if item['type'] == 'blob'], [item for item in content if item['type'] == 'tree']
+    files = pd.DataFrame(files)[['path', 'size']]
+    dirs = pd.DataFrame(dirs)
+    files["type"] = files["path"].apply(file_type)
+    files = files.groupby("type").agg({"size": "sum", "path": "count"})
+    total = convert_bytes((byte_sum := files["size"].sum()))
+    paths = files["path"].sum()
+    files["Size"] = files["size"].apply(convert_bytes)
+    files = files.append(pd.DataFrame({"Size": [total], "path": [paths], "size" : byte_sum}, index = ["Total"])).rename(columns = {"size": "Bytes", "path": "Files"})
+    return files[['Files', 'Size', "Bytes"]].sort_values("Bytes", ascending = False)

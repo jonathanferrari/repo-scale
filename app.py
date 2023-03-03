@@ -1,45 +1,85 @@
-"""
-# My first app
-Here's our first attempt at using data to create a table:
-"""
-
 import streamlit as st
 import pandas as pd
+import numpy as np
+import plotly.express as px
 
-st.write("Here's our first attempt at using data to create a table:")
-st.write(pd.DataFrame({
-    'first column': [1, 2, 3, 4],
-    'second column': [10, 20, 30, 40]
-}))
+from utils import *
+import streamlit.components.v1 as components
+md = st.markdown
 
-x = st.slider('x')  # 👈 this is a widget
-st.write(x, 'squared is', x * x)
+st.set_page_config(
+    page_title = "Git Scale",
+    layout="wide",
+    page_icon = "📊"
+    )
 
-st.text_input("Your name", key="name")
+st.title("Git Scale")
 
-st.session_state.name
+@st.cache_data
+def cached_content(url):
+    return get_repo_content(url)
 
-# Add a selectbox to the sidebar:
-add_selectbox = st.sidebar.selectbox(
-    'How would you like to be contacted?',
-    ('Email', 'Home phone', 'Mobile phone')
-)
+@st.cache_data
+def cached_analyze(path):
+    return analyze(path)
 
-# Add a slider to the sidebar:
-add_slider = st.sidebar.slider(
-    'Select a range of values',
-    0.0, 100.0, (25.0, 75.0)
-)
+with st.sidebar:
+    st.header("Search")
+    user_search = st.text_input("Search for a GitHub user", value = "ds-modules")
+    result = find_user(user_search)
+    if isinstance(result, list):
+        if result == []:
+            st.error("No results found, please try another search term")
+        else:
+            user = st.selectbox("Select a user", options = result)
+            repos = get_user_repo_names(user)
+            st.selectbox("Select a repository", options = repos)
+    else:
+        user = result
+        repos = get_user_repo_names(user)
+        st.selectbox("Select a repository", options = repos)
+        
+        
+        
+md("## A lightweight tool for visualizing the size of any public GitHub repository")
+md("> ### Created by [Jonathan Ferrari](https://github.jonathanferrari.com)")
 
-left_column, right_column = st.columns(2)
-# You can use a column just like st.sidebar:
-left_column.button('Press me!')
+md("Enter a GitHub repository URL below to get started, or use the search function to find a repository")
 
-# Or even better, call Streamlit functions inside a "with" block:
-with right_column:
-    chosen = st.radio(
-        'Sorting hat',
-        ("Gryffindor", "Ravenclaw", "Hufflepuff", "Slytherin"))
-    st.write(f"You are in {chosen} house!")
+url = st.text_input("Enter a GitHub repository URL:", placeholder="https://github.com/example-user/example-repo", value = "https://github.com/ds-modules/data-4ac")
+
+def color_top_row(row):
+    color = "transparent"
+    if row.name == "Total":
+        color = "#f0f0f0"
+    return [f"background-color: {color}"] * len(row)
+
+def index_color(column):
+    color = "transparent"
+    if column.name == "Total":
+        color = "#f0f0f0"
+    return [f"background-color: {color}"] * len(column)
+
+if url:
+    col1, col2 = st.columns(2)
+    path = get_repo_path(url) 
+    content = cached_content(url = url)
+    with col2:
+        files = [content['path'] for content in content if content['type'] == 'blob']
+        size = convert_bytes(sum([content['size'] for content in content if content['type'] == 'blob']))
+        md(f"## Repository Size: {size}")
+        df = cached_analyze(path)
+        st.dataframe(df[["Files", "Size"]].style.apply(color_top_row, axis=1).apply(index_color, axis=0), use_container_width=True, height=700)
+    with col1:
+        type_df = df.copy().drop(index="Total")
+        fig = px.pie(type_df, values='Bytes', names=type_df.index, title=f'File Type Distribution of {path}', hover_data=["Size"],
+                     template = "seaborn", height = 800)
+        fig.update_traces(textposition='inside', textinfo='percent+label')
+        st.plotly_chart(fig)
+        
+    md("## Repository Readme:")
+    md("<hr style='line-height:0px;border: 3px solid #003262'/>", unsafe_allow_html=True)
+    md("<hr style='line-height:0px;border: 3px solid #E2C258'/>", unsafe_allow_html=True)
+    md(get_readme(path))
     
-st.write("This is the first line")
+# bold the first row of the dataframe and highlight the index column with blue
